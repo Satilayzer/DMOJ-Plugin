@@ -1,0 +1,102 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"POT-Creation-Date: \n"
+"PO-Revision-Date: \n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: uk\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 3.4.4\n"
+
+msgid "Problems"
+msgstr "Задачі"
+
+msgid "Editorials"
+msgstr "Editorials"
+
+msgid "Submissions"
+msgstr "Відправки"
+
+msgid "Users"
+msgstr "Рейтинг"
+
+msgid "Organizations"
+msgstr "Заклади"
+
+msgid "Contests"
+msgstr "Турніри"
+
+msgid "About"
+msgstr "Про"
+
+msgid "Status"
+msgstr "Статус"
+
+msgid "Runtimes"
+msgstr ""
+
+msgid "Tips"
+msgstr "Поради"
+
+msgid "API"
+msgstr ""
+
+msgid "Github"
+msgstr ""
+
+msgid "???"
+msgstr "???"
+
+msgid "Ad Hoc"
+msgstr "Спеціальні"
+
+msgid "Advanced Math"
+msgstr "Крута математика"
+
+msgid "Brute Force"
+msgstr "Перебір"
+
+msgid "Data Structures"
+msgstr "Структури даних"
+
+msgid "Divide and Conquer"
+msgstr "Розділяй і володарюй"
+
+msgid "Dynamic Programming"
+msgstr "Динамічне програмування"
+
+msgid "Game Theory"
+msgstr "Теорія ігор"
+
+msgid "Geometry"
+msgstr "Геометрія"
+
+msgid "Graph Theory"
+msgstr "Теорія графів"
+
+msgid "Greedy Algorithms"
+msgstr "Жадібні алгоритми"
+
+msgid "Implementation"
+msgstr "Реалізація"
+
+msgid "Intermediate Math"
+msgstr "Проміжна математика"
+
+msgid "Recursion"
+msgstr "Рекурсія"
+
+msgid "Regular Expressions"
+msgstr "Регулярні вирази"
+
+msgid "Simple Math"
+msgstr "Проста математика"
+
+msgid "Simulation"
+msgstr "Моделювання"
+
+msgid "String Algorithms"
+msgstr "Рядкові алгоритми"
