@@ -123,7 +123,15 @@
                 <td>{% if case.status != 'SC' %}{{ case.memory|kbdetailformat }}]{% endif %}</td>
 
                 {% if not batch.id %}
-                    <td>({{ case.points|floatformat(-3) }}/{{ case.total|floatformat(0) }})</td>
+                    <td>
+                        ({{ case.points|floatformat(-3) }}/{{ case.total|floatformat(0) }})
+                        {% if case.status != 'AC' and case.case in allowed_publication_case_numbers %}
+                            &nbsp;
+                            <a href="{{ url('submission_testcase_report_download', submission.id, case.case) }}">
+                                {{ _('Download testcase report') }}
+                            </a>
+                        {% endif %}
+                    </td>
                 {% endif %}
             </tr>
 

@@ -20,7 +20,7 @@ from judge.views import TitledTemplateView, api, blog, comment, contests, langua
     two_factor, user, widgets
 from judge.views.magazine import MagazinePage
 from judge.views.problem_data import ProblemDataView, ProblemSubmissionDiff, \
-    problem_data_file, problem_init_view
+    problem_data_file, problem_init_view, update_test_publication_rule
 from judge.views.register import ActivationView, RegistrationView
 from judge.views.select2 import AssigneeSelect2View, CommentSelect2View, ContestSelect2View, \
     ContestUserSearchSelect2View, OrganizationSelect2View, OrganizationUserSelect2View, ProblemSelect2View, \
@@ -139,6 +139,7 @@ urlpatterns = [
         path('/test_data', ProblemDataView.as_view(), name='problem_data'),
         path('/test_data/init', problem_init_view, name='problem_data_init'),
         path('/test_data/diff', ProblemSubmissionDiff.as_view(), name='problem_submission_diff'),
+        path('/test_data/publication-rule', update_test_publication_rule, name='update_test_publication_rule'),
         path('/data/<path:path>', problem_data_file, name='problem_data_file'),
 
         path('/tickets/', ticket.ProblemTicketListView.as_view(), name='problem_ticket_list'),
@@ -181,8 +182,10 @@ urlpatterns = [
          name='submission_source_download'),
 
     path('submission/<int:submission>', include([
-        path('', submission.SubmissionStatus.as_view(), name='submission_status'),
-        path('/abort', submission.abort_submission, name='submission_abort'),
+    path('', submission.SubmissionStatus.as_view(), name='submission_status'),
+    path('/testcase/<int:case>/download/', submission.download_testcase_report,
+         name='submission_testcase_report_download'),
+    path('/abort', submission.abort_submission, name='submission_abort'),
     ])),
 
     path('users/', include([

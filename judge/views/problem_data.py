@@ -10,16 +10,17 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import ValidationError
 from django.forms import BaseModelFormSet, CharField, ChoiceField, HiddenInput, ModelForm, NumberInput, Select, \
     formset_factory
-from django.http import Http404, HttpResponse, HttpResponseRedirect
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils.html import escape, format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext as _, gettext_lazy
 from django.views.generic import DetailView
+from django.views.decorators.http import require_POST
 
 from judge.highlight_code import highlight_code
-from judge.models import Problem, ProblemData, ProblemTestCase, Submission, problem_data_storage
+from judge.models import Problem, ProblemData, ProblemTestCase, Submission, TestPublicationRule, problem_data_storage
 from judge.models.problem_data import CUSTOM_CHECKERS, IO_METHODS
 from judge.utils.problem_data import ProblemDataCompiler
 from judge.utils.unicode import utf8text
@@ -198,8 +199,16 @@ class ProblemDataView(TitleMixin, ProblemManagerMixin):
                                instance=ProblemData.objects.get_or_create(problem=self.object)[0])
 
     def get_case_formset(self, files, post=False):
-        return ProblemCaseFormSet(data=self.request.POST if post else None, prefix='cases', valid_files=files,
-                                  queryset=ProblemTestCase.objects.filter(dataset_id=self.object.pk).order_by('order'))
+        queryset = ProblemTestCase.objects.filter(
+            dataset_id=self.object.pk
+        ).select_related('publication_rule').order_by('order')
+
+        return ProblemCaseFormSet(
+            data=self.request.POST if post else None,
+            prefix='cases',
+            valid_files=files,
+            queryset=queryset,
+        )
 
     def get_valid_files(self, data, post=False):
         try:
@@ -223,6 +232,15 @@ class ProblemDataView(TitleMixin, ProblemManagerMixin):
         context['valid_files_json'] = mark_safe(json.dumps(context['valid_files']))
         context['valid_files'] = set(context['valid_files'])
         context['all_case_forms'] = chain(context['cases_formset'], [context['cases_formset'].empty_form])
+        allowed_publication_case_ids = set(
+            TestPublicationRule.objects.filter(
+                testcase__dataset_id=self.object.pk,
+                is_allowed=True,
+            ).values_list('testcase_id', flat=True)
+        )
+
+        for form in context['cases_formset'].forms:
+            form.publication_allowed = bool(form.instance.pk and form.instance.pk in allowed_publication_case_ids)
 
         if self.request.user.has_perm('judge.create_mass_testcases'):
             context['testcase_limit'] = 9999
@@ -248,19 +266,49 @@ class ProblemDataView(TitleMixin, ProblemManagerMixin):
 
     def post(self, request, *args, **kwargs):
         self.object = problem = self.get_object()
+        print("POST publication keys:", [k for k in request.POST.keys() if "publication_rule_" in k])
+        print("POST publication values:", {k: request.POST.get(k) for k in request.POST.keys() if "publication_rule_" in k})
         data_form = self.get_data_form(post=True)
         valid_files = self.get_valid_files(data_form.instance, post=True)
         data_form.zip_valid = valid_files is not False
         cases_formset = self.get_case_formset(valid_files, post=True)
         if self.check_valid(data_form, cases_formset):
             data = data_form.save()
-            for case in cases_formset.save(commit=False):
-                case.dataset_id = problem.id
-                case.save()
-            for case in cases_formset.deleted_objects:
-                case.delete()
+
+            for form in cases_formset.forms:
+                if not hasattr(form, 'cleaned_data') or not form.cleaned_data:
+                    continue
+
+                if form.cleaned_data.get('DELETE'):
+                    if form.instance.pk:
+                        form.instance.delete()
+                    continue
+
+                testcase = form.save(commit=False)
+                testcase.dataset_id = problem.id
+                testcase.save()
+
+                if testcase.type != 'C':
+                    continue
+
+                is_allowed = request.POST.get(f'publication_rule_{form.prefix}') == 'on'
+
+                rule, created = TestPublicationRule.objects.get_or_create(
+                    testcase=testcase,
+                    defaults={
+                        'is_allowed': is_allowed,
+                        'updated_by': request.profile,
+                    },
+                )
+
+                if not created:
+                    rule.is_allowed = is_allowed
+                    rule.updated_by = request.profile
+                    rule.save()
+
             ProblemDataCompiler.generate(problem, data, problem.cases.order_by('order'), valid_files)
             return HttpResponseRedirect(request.get_full_path())
+        
         return self.render_to_response(self.get_context_data(data_form=data_form, cases_formset=cases_formset,
                                                              valid_files=valid_files))
 
@@ -311,4 +359,58 @@ def problem_init_view(request, problem):
         'content_title': mark_safe(escape(_('Generated init.yml for %s')) % (
             format_html('<a href="{1}">{0}</a>', problem.name,
                         reverse('problem_detail', args=[problem.code])))),
+    })
+
+@require_POST
+@login_required
+def update_test_publication_rule(request, problem):
+    problem_obj = get_object_or_404(Problem, code=problem)
+
+    if not problem_obj.is_editable_by(request.user):
+        raise Http404()
+
+    testcase_id = request.POST.get('testcase_id')
+    is_allowed_raw = request.POST.get('is_allowed')
+
+    if not testcase_id or is_allowed_raw is None:
+        return HttpResponseBadRequest('testcase_id and is_allowed are required.')
+
+    try:
+        testcase_id = int(testcase_id)
+    except ValueError:
+        return HttpResponseBadRequest('Invalid testcase_id.')
+
+    if is_allowed_raw.lower() in ('1', 'true', 'yes', 'on'):
+        is_allowed = True
+    elif is_allowed_raw.lower() in ('0', 'false', 'no', 'off'):
+        is_allowed = False
+    else:
+        return HttpResponseBadRequest('Invalid is_allowed value.')
+
+    testcase = get_object_or_404(
+        ProblemTestCase,
+        id=testcase_id,
+        dataset=problem_obj,
+        type='C',
+    )
+
+    rule, created = TestPublicationRule.objects.get_or_create(
+        testcase=testcase,
+        defaults={
+            'is_allowed': is_allowed,
+            'updated_by': request.profile,
+        },
+    )
+
+    if not created:
+        rule.is_allowed = is_allowed
+        rule.updated_by = request.profile
+        rule.save()
+
+    return JsonResponse({
+        'success': True,
+        'created': created,
+        'testcase_id': testcase.id,
+        'order': testcase.order,
+        'is_allowed': rule.is_allowed,
     })

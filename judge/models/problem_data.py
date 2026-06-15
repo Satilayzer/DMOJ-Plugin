@@ -7,7 +7,14 @@ from django.utils.translation import gettext_lazy as _
 
 from judge.utils.problem_data import ProblemDataStorage
 
-__all__ = ['problem_data_storage', 'problem_directory_file', 'ProblemData', 'ProblemTestCase', 'CHECKERS']
+__all__ = [
+    'problem_data_storage',
+    'problem_directory_file',
+    'ProblemData',
+    'ProblemTestCase',
+    'TestPublicationRule',
+    'CHECKERS',
+]
 
 problem_data_storage = ProblemDataStorage()
 
@@ -134,3 +141,29 @@ class ProblemTestCase(models.Model):
     checker = models.CharField(max_length=10, verbose_name=_('checker'), choices=CHECKERS, blank=True)
     checker_args = models.TextField(verbose_name=_('checker arguments'), blank=True,
                                     help_text=_('Checker arguments as a JSON object.'))
+
+class TestPublicationRule(models.Model):
+    testcase = models.OneToOneField(
+        ProblemTestCase,
+        on_delete=models.CASCADE,
+        related_name='publication_rule',
+        verbose_name=_('test case'),
+    )
+    is_allowed = models.BooleanField(verbose_name=_('is allowed'), default=False)
+    updated_at = models.DateTimeField(verbose_name=_('updated at'), auto_now=True)
+    updated_by = models.ForeignKey(
+        'judge.Profile',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_test_publication_rules',
+        verbose_name=_('updated by'),
+    )
+
+    class Meta:
+        db_table = 'test_publication_rule'
+        verbose_name = _('test publication rule')
+        verbose_name_plural = _('test publication rules')
+
+    def __str__(self):
+        return f'Rule for testcase {self.testcase_id}: allowed={self.is_allowed}'

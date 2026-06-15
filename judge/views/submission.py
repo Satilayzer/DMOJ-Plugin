@@ -1,5 +1,6 @@
 import json
 import os
+import zipfile
 from collections import namedtuple
 from itertools import groupby
 from operator import attrgetter
@@ -11,8 +12,8 @@ from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist, PermissionDenied
 from django.core.files.storage import default_storage
 from django.db.models import Prefetch, Q
-from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseNotFound, HttpResponseRedirect, \
-    JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, HttpResponseNotFound, \
+    HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
@@ -24,7 +25,8 @@ from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import DetailView, ListView
 
 from judge.highlight_code import highlight_code
-from judge.models import Contest, Language, Organization, Problem, ProblemTranslation, Profile, Submission
+from judge.models import Contest, Language, Organization, Problem, ProblemData, ProblemTestCase, ProblemTranslation, \
+    Profile, Submission, SubmissionTestCase, TestPublicationRule
 from judge.models.problem import ProblemTestcaseResultAccess, SubmissionSourceAccess
 from judge.utils.infinite_paginator import InfinitePaginationMixin
 from judge.utils.lazy import memo_lazy
@@ -259,6 +261,13 @@ class SubmissionStatus(SubmissionDetailBase):
             context['cases_data'] = get_problem_testcases_data(submission.problem)
         else:
             context['cases_data'] = {}
+            context['allowed_publication_case_numbers'] = set(
+            ProblemTestCase.objects.filter(
+                dataset=submission.problem,
+                type='C',
+                publication_rule__is_allowed=True,
+            ).values_list('order', flat=True)
+        )
 
         context['can_view_testcase_status'] = self.request.user.is_superuser or \
             submission.problem.testcase_result_visibility_mode == ProblemTestcaseResultAccess.ALL_TEST_CASE
@@ -321,6 +330,93 @@ class SubmissionSourceDownload(SubmissionDetailBase):
             return response
         except PermissionDenied:
             return HttpResponseNotFound()
+
+def _read_text_from_zip(zip_path, file_name):
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            with zf.open(file_name) as f:
+                return f.read().decode('utf-8', errors='replace')
+    except KeyError:
+        raise Http404(f'File "{file_name}" was not found in the test archive.')
+    except zipfile.BadZipFile:
+        raise Http404('Problem test archive is corrupted or invalid.')
+
+
+@require_GET
+@login_required
+def download_testcase_report(request, submission, case):
+    submission_obj = get_object_or_404(Submission, id=int(submission))
+
+    if not submission_obj.can_see_detail(request.user):
+        raise PermissionDenied()
+
+    submission_case = get_object_or_404(
+        SubmissionTestCase,
+        submission=submission_obj,
+        case=case,
+    )
+
+    if submission_case.status == 'AC':
+        return HttpResponseForbidden('Report download is available only for failed test cases.')
+
+    problem_testcase = get_object_or_404(
+        ProblemTestCase,
+        dataset=submission_obj.problem,
+        order=case,
+        type='C',
+    )
+
+    publication_rule = get_object_or_404(
+        TestPublicationRule,
+        testcase=problem_testcase,
+    )
+
+    if not publication_rule.is_allowed:
+        return HttpResponseForbidden('Publication of this test case is not allowed.')
+
+    problem_data = get_object_or_404(ProblemData, problem=submission_obj.problem)
+
+    if not problem_data.zipfile:
+        raise Http404('No test archive is configured for this problem.')
+
+    zip_path = problem_data.zipfile.path
+
+    if not os.path.exists(zip_path):
+        raise Http404('Problem test archive file was not found on disk.')
+
+    if not problem_testcase.input_file:
+        raise Http404('Input file name is missing for this test case.')
+
+    if not problem_testcase.output_file:
+        raise Http404('Output file name is missing for this test case.')
+
+    input_data = _read_text_from_zip(zip_path, problem_testcase.input_file)
+    expected_output = _read_text_from_zip(zip_path, problem_testcase.output_file)
+    user_output = submission_case.output or ''
+
+    report_content = (
+        f'Test case report\n'
+        f'================\n\n'
+        f'Submission ID: {submission_obj.id}\n'
+        f'Problem: {submission_obj.problem.code}\n'
+        f'Test case: {case}\n'
+        f'Status: {submission_case.status}\n\n'
+        f'Input:\n'
+        f'------\n'
+        f'{input_data}\n\n'
+        f'Expected output:\n'
+        f'----------------\n'
+        f'{expected_output}\n\n'
+        f'User output:\n'
+        f'------------\n'
+        f'{user_output}\n'
+    )
+
+    response = HttpResponse(report_content, content_type='text/plain; charset=utf-8')
+    response['Content-Disposition'] = (
+        f'attachment; filename="submission_{submission_obj.id}_case_{case}_report.txt"'
+    )
+    return response
 
 
 @require_POST
